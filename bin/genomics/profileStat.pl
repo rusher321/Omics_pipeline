@@ -23,7 +23,7 @@ if ($aim =~ /geneCount/i){
 	$dec ||= 30; $dec = 1 / (10**$dec);
 
 	my %count;
-	my $openMethod = ($profile =~ /gz^/)?"gzip -dc $profile |":"$profile";
+	my $openMethod = ($profile =~ /gz$/)?"gzip -dc $profile |":"$profile";
 	open IN,"$openMethod" || die $!;
 	chomp(my $head = <IN>);
 	my @heads = split(/\t/,$head);
@@ -37,7 +37,7 @@ if ($aim =~ /geneCount/i){
 	}
 	close IN;
 	open OUT,"> $output" || die $!;
-	for (my $r=1;$r<=@heads;$r++){
+	for (my $r=1;$r<@heads;$r++){
 		print OUT "$heads[$r]\t$count{$r}\n";
 	}
 	close OUT;
