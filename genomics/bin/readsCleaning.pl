@@ -2,17 +2,22 @@
 use warnings;
 use strict;
 
-die &usage if @ARGV !=7;
+die &usage if @ARGV !=8;
 
 my ($fq1,$fq2,$pfx,$qt,$l,$n,$qf,$lf) = @ARGV;
 
-open FQ1,"gzip -dc $fq1 |",or die "error\n";
-#open OUTT,"|gzip >$pfx.trimed.fq.gz",or die "error\n";
-#open OUTN,"|gzip >$pfx.cleanN.fq.gz",or die "error\n";
-open OUT,"|gzip >$pfx.clean.fq.gz",or die "error\n";
+if($fq1 eq $fq2){
+	open FQ1,"gzip -dc $fq1 |",or die "error\n";
+	open OUT1,"|gzip >$pfx.clean.fq.gz",or die "error\n";
+}else{
+	open FQ1,"gzip -dc $fq1 |",or die "error\n";
+	open FQ2,"gzip -dc $fq2 |",or die "error\n";
+	open OUT1,"|gzip >$pfx.clean.fq1.gz",or die "error\n";
+	open OUT2,"|gzip >$pfx.clean.fq2.gz",or die "error\n";
+}
 open STAT,"> $pfx.clean.stat_out",or die "error\n";
 
-my($total,$remainN,$remainQ,$sum_bp,$max_bp,$min_bp)= (0,0,0,0,0,10000);
+my($total,$remainN,$remainQ,$sum_bp1,$max_bp1,$min_bp1,$sum_bp2,$max_bp2,$min_bp2)= (0,0,0,0,0,10000,0,0,10000);
 my %READ;
 while(<FQ1>){
 	chomp;
@@ -28,31 +33,31 @@ while(<FQ1>){
 	my $len = $originLength-$Tscore;
 	$seq=substr($seq,0,$len);
 	$quality=substr($quality,0,$len);
-#	print OUTT "$_\n$seq\n$num\n$quality\n";
 	# filter
 	$count=$seq=~tr/N/N/;
-	next if($count > $n || $len < $lf);
-#	print OUTN "$_\n$seq\n$num\n$quality\n";
+	next if($count > $n || $len < $lf);					# N number & length limit judgement
 	$remainN ++; 
+	# filter more
 	my $Qscore = &Qstat($quality,$qf,"filter");
-	next if (($Qscore*2) > length($quality));
-	$READ{$a[0]}{'fqs'} = ++ ;
-	$READ{$a[0]}{'seq'} = "$a[0]\s$a[1]\slength=$len\n$seq\n$num\n$quality\n";
+	next if (($Qscore*2) > length($quality));			# half Q score judgement
+	# quality pass
+	$READ{$a[0]}{'fqs'} = "pass";
+	$READ{$a[0]}{'seq'} = "$a[0] $a[1] length=$len\n$seq\n$num\n$quality\n";
 	$READ{$a[0]}{'len'} = $len;
-#	print OUT "$a[0]\s$a[1]\slength=$len\n$seq\n$num\n$quality\n";
-	next if $fq1 ne $fq2;
+	next unless $fq1 eq $fq2;
+	# stat
+	print OUT1 $READ{$a[0]}{'seq'};
 	$remainQ ++;
-	$max_bp = ($max_bp > $len)?$max_bp:$len;
-	$min_bp = ($min_bp < $len)?$min_bp:$len;
-	$sum_bp += $len;
+	$max_bp1 = ($max_bp1 > $len)?$max_bp1:$len;
+	$min_bp1 = ($min_bp1 < $len)?$min_bp1:$len;
+	$sum_bp1 += $len;
 }
 close FQ1;
-if($fq1 ne $fq2){
-	open FQ2,"gzip -dc $fq2 |",or die "error\n";
+unless($fq1 eq $fq2){
 	while(<FQ2>){
 		chomp;
 		my @a =split;
-		next if $READ{$a[0]}{'fqs'} == 0;
+		next unless defined $READ{$a[0]}{'fqs'};# ne "pass";
 		chomp(my $seq=<FQ2>);
 		chomp(my $num=<FQ2>);
 		chomp(my $quality=<FQ2>);
@@ -63,21 +68,32 @@ if($fq1 ne $fq2){
 		$seq=substr($seq,0,$len);
 		$quality=substr($quality,0,$len);
 		# filter
-		$count=$seq=~tr/N/N/;
+		my $count=$seq=~tr/N/N/;
 		next if($count > $n || $len < $lf);
 		my $Qscore = &Qstat($quality,$qf,"filter");
 		next if (($Qscore*2) > length($quality));
 		$remainQ ++;
+		print OUT1 $READ{$a[0]}{'seq'};
+		print OUT2 "$a[0] $a[1] length=$len\n$seq\n$num\n$quality\n";
+
 		($max_bp2,$min_bp2,$sum_bp2) = &lengthAvg($len,$max_bp2,$min_bp2,$sum_bp2);
-		($max_bp1,$min_bp1,$sum_bp1) = &lengthAvg($len,$max_bp1,$min_bp1,$sum_bp1);
+		($max_bp1,$min_bp1,$sum_bp1) = &lengthAvg($READ{$a[0]}{'len'},$max_bp1,$min_bp1,$sum_bp1);
 	}
 }
-close OUT;
+close FQ2;
+close OUT1;
+close OUT2;
 
-my $avg  = $sum_bp / $total;
+my $avg1 = $sum_bp1 / $total;
+my $avg2 = $sum_bp2 / $total;
 my $rate = $remainQ / $total;
-print STAT "Total\tmax\tmin\tavg\tremain(trim_limit=$l,Qt=$qt,N=$n,Qf=$qf,min=$lf)\trate\tSampleTAG\n";
-print STAT "$total\t$max_bp\t$min_bp\t$avg\t$remainQ\t$rate\t$pfx\n";
+unless ($fq1 eq $fq2){
+	print STAT "Total\tmax1\tmin1\tavg1\tmax2\tmin2\tavg2\tremain\trate\tSampleTAG(trim_limit=$l,Qt=$qt,N=$n,Qf=$qf,min=$lf)\n";
+	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$max_bp2\t$min_bp2\t$avg2\t$remainQ\t$rate\t$pfx\n";
+}else{
+	print STAT "Total\tmax\tmin\tavg\tremain\trate\tSampleTAG(trim_limit=$l,Qt=$qt,N=$n,Qf=$qf,min=$lf)\n";
+	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$remainQ\t$rate\t$pfx\n";
+}
 
 close STAT;
 
