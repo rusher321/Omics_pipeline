@@ -25,7 +25,7 @@ options:
 					2	remove host genomic reads
 					3	soap mapping to microbiotic genomics
 	-o|outdir	:output directory path. Conatins the results and scripts.
-	-c|config	:set parameters for each setp, default Qt=20,l=10,N=1,Qf=15
+	-c|config	:set parameters for each setp, default Qt=20,l=10,N=1,Qf=15,lf=0
 					Qt	Qvalue for trim
 					l	bp length for trim
 					N	tolerance number of N for filter
@@ -52,7 +52,7 @@ die &version if defined $version;
 # ####################
 $step    ||= "123";
 $out_dir ||= $cwd; $out_dir = abs_path($out_dir);
-$config  ||= "Qt=20,l=10,N=1,Qf=15";
+$config  ||= "Qt=20,l=10,N=1,Qf=15,lf=0";
 foreach my $par (split(/,/,$config)){
 	my @a = split(/=/,$par);
 	$CFG{$a[0]} = $a[1];
@@ -96,47 +96,59 @@ open B3,">$dir_s/batch.soap.sh";
 open C1,">$out_dir/qsub_all.sh";
 
 open IN,"<$path_f" || die $!;
-my ($tmp_out,$tmp_outN,$tmp_outQ);
+my (%SAM,@samples,$tmp_out,$tmp_outN,$tmp_outQ);
 while (<IN>){
 	chomp;
 	my @a = split;
 	my ($sam,$pfx,$path) = @a;
-	open S1,">$dir_sI/$pfx.01.clean.sh";
+	$SAM{$sam}{$pfx} = $path;
+}
+
+foreach my $sam (keys %SAM){
+	my @fqs = keys %{$SAM{$sam}};
+	die "$sam got more than 2 fq files, pls check it out!" if @fqs > 2;
+	my ($fq1,$fq2) = ($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]});
+
 	if ($step =~ /1/){
-		print S1 "perl $s_clean $path $dir_c/$pfx $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'}\n";
-		$tmp_out  = "$dir_c/$pfx.trimed.fq.gz";
-		$tmp_outN = "$dir_c/$pfx.cleanN.fq.gz";
-		$tmp_outQ = "$dir_c/$pfx.cleanQ.fq.gz";
+		open SH,">$dir_sI/$sam.clean.sh";
+		if (@fqs eq 2){
+			print SH "perl $s_clean $fq1 $fq2 $dir_c/$sam $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'} $CFG{'lf'}\n";
+			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_r/$sam.clean.fq1.gz","$dir_r/$sam.clean.fq2.gz");
+		}else{
+			print SH "perl $s_clean $fq1 $fq1 $dir_c/$sam $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'} $CFG{'lf'}\n";
+			$tmp_out = "$dir_c/$sam.clean.fq.gz";
+		}
+		close SH;
+		print B1 "sh $dir_sI/$sam.clean.sh\n";
 	}
-#	if ($s =~ /2/){
-#		$tmp_out ||= $path;
-#		print S2 "perl $s_filter $tmp_out $dir_f/$pfx $nc\n";
-#		print S2 "perl $s_tMore $dir_f/$pfx.clean.fq.gz $dir_f/$pfx $qc \n";
-#		$tmp_out = "$dir_f/$pfx.cleanN.fq.gz";
-#		$tmp_out2 = "$dir_f/$pfx.cleanQ.fq.gz";
-#	}
-	close S1;
-	open S2,">$dir_sI/$pfx.02.rmhost.sh";
+
 	if ($step =~ /2/){
-		$tmp_outQ ||= $path;
-		print S2 "perl $s_rm -a $tmp_outQ -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$pfx -q\n";
-		$tmp_out = "$dir_r/$pfx.rmhost.fq.gz";
+		open SH,">$dir_sI/$sam.rmhost.sh";
+		if (@fqs eq 2){
+			print SH "perl $s_rm -a $fq1 -b $fq2 -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$sam -q\n";
+			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_r/$sam.rmhost.fq1.gz","$dir_r/$sam.rmhost.fq2.gz");
+		}else{
+			print SH "perl $s_rm -a $tmp_out -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$sam -q\n";
+			$tmp_out = "$dir_r/$sam.rmhost.fq.gz";
+		}
+		close SH;
+		print B2 "sh $dir_sI/$sam.rmhost.sh\n";
 	}
-	close S2;
 
 	if ($step =~ /3/){
-		open S3,">$dir_sp/$pfx.03.soap.sh";
-		$tmp_out ||= $path;
-		print S3 "perl $s_soap -i1 $tmp_out -ins $ins_f -o $dir_s -p $pfx > $dir_s/$pfx.log\n";
-		close S3;
+		open SH,">$dir_sI/$sam.soap.sh";
+		if (@fqs eq 2){
+			print SH "perl $s_soap -i1 $fq1 -i2 $fq2 -ins $ins_f -o $dir_s -p $sam > $dir_sp/$sam.log\n";
+		}else{
+			print SH "perl $s_soap -i1 $tmp_out -ins $ins_f -o $dir_s -p $sam > $dir_sp/$sam.log\n";
+		}
+		close SH;
+		print B3 "sh $dir_sI/$sam.soap.sh\n";
 	}
-	print B1 "sh $dir_s/$pfx.01.clean.sh\n";
-	print B2 "sh $dir_s/$pfx.02.rmhost.sh\n";
-	print B3 "sh $dir_s/$pfx.03.soap.sh\n";
 }
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.2 -d $dir_s/qsub_1 -l vf=0.3G -q st.q -P st_ms -r $dir_s/batch.clean.sh\n";
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.3 -d $dir_s/qsub_2 -l vf=8G -q st.q -P st_ms -r $dir_s/batch.rmhost.sh\n";
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.4 -d $dir_s/qsub_3 -l vf=15G -q st.q -P st_ms -r $dir_s/batch.soap.sh\n";
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.c -d $dir_s/qsub_1 -l vf=0.3G -q st.q -P st_ms -r $dir_s/batch.clean.sh\n" if $step =~ /1/;
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.r -d $dir_s/qsub_2 -l vf=8G,p=8 -q st.q -P st_ms -r $dir_s/batch.rmhost.sh\n" if $step =~ /2/;
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.s -d $dir_s/qsub_3 -l vf=15G,p=8 -q st.q -P st_ms -r $dir_s/batch.soap.sh\n" if $step =~ /3/;
 
 close B1;
 close B2;
