@@ -1,11 +1,11 @@
 #!/usr/bin/perl -w
 use warnings;
 use strict;
+use File::Basename; 
 
 die &usage if @ARGV !=8;
 
 my ($fq1,$fq2,$pfx,$qt,$l,$n,$qf,$lf) = @ARGV;
-
 if($fq1 eq $fq2){
 	open FQ1,"gzip -dc $fq1 |",or die "error\n";
 	open OUT1,"|gzip >$pfx.clean.fq.gz",or die "error\n";
@@ -87,12 +87,13 @@ close OUT2;
 my $avg1 = $sum_bp1 / $total;
 my $avg2 = $sum_bp2 / $total;
 my $rate = $remainQ / $total;
+my $tag = basename($pfx);
 unless ($fq1 eq $fq2){
 	print STAT "Total\tmax1\tmin1\tavg1\tmax2\tmin2\tavg2\tremain\trate\tSampleTAG(trim_limit=$l,Qt=$qt,N=$n,Qf=$qf,min=$lf)\n";
-	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$max_bp2\t$min_bp2\t$avg2\t$remainQ\t$rate\t$pfx\n";
+	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$max_bp2\t$min_bp2\t$avg2\t$remainQ\t$rate\t$tag\n";
 }else{
 	print STAT "Total\tmax\tmin\tavg\tremain\trate\tSampleTAG(trim_limit=$l,Qt=$qt,N=$n,Qf=$qf,min=$lf)\n";
-	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$remainQ\t$rate\t$pfx\n";
+	print STAT "$total\t$max_bp1\t$min_bp1\t$avg1\t$remainQ\t$rate\t$tag\n";
 }
 
 close STAT;
