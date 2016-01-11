@@ -82,6 +82,13 @@ print STAT "$total\t$max_bp\t$min_bp\t$avg\t$remainQ\t$rate\t$pfx\n";
 close STAT;
 
 # sub
+sub lengthAvg{
+	my($l,$max,$min,$sum) = @_;
+	$max = ($max > $l)?$max:$l;
+	$min = ($min < $l)?$min:$l;
+	$sum += $l;
+	return($max,$min,$sum);
+}
 
 sub Qstat {
 	my ($q_l,$q_n,$method,$c_n) = @_;
