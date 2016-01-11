@@ -1,93 +1,157 @@
 #!/usr/bin/perl -w
+use warnings;
 use strict;
+use Getopt::Long;
+use File::Basename;
+use FindBin qw($Bin);
+use Cwd 'abs_path';
 
-my($f,$f_ins,$s,$o) = @ARGV;
-my $usage = "usage: perl $0 <path_file> <ins_file> <steps(1234)> <output dir>
-	path_file should contained such column:
+my $cwd = abs_path;
+#my($f,$f_ins,$s,$out_dir) = @ARGV;
+#my $usage = "usage: perl $0 <path_file> <ins_file> <steps(1234)> <output dir>
+#	path_file should contained such column:
 	#sample_name\t#trim_quality\t#trim_length_cut\t#N_cutoff\t#50\%ofQ_control\t#path
 	#sample1\t20\t10\t1\t15\t/path/to/fq/file
-";
-die $usage if @ARGV < 4;
-########################
-my $s_trim   = "/lfs1/ST_PMO2015G/F13ZOOYJSY1389/metagenomics.20151225/lib/trim_dev.pl";
-my $s_filter = "/lfs1/ST_PMO2015G/F13ZOOYJSY1389/metagenomics.20151225/lib/filter_dev.pl";
-my $s_tMore  = "/lfs1/ST_PMO2015G/F13ZOOYJSY1389/metagenomics.20151225/lib/trim_more_dev.pl";
-my $s_rm     = "/ifs5/PC_MICRO_META/PRJ/MetaSystem/analysis_flow/bin/program/rmhost_v1.0.pl";
+#";
+sub usage {
+	print <<USAGE;
+usage:
+	perl $0 [options]
+options:
+	-p|path		:[essential]sample path file
+	-i|ins		:[essential]insert info file
+	-s|step		:functions,default 123
+					1	trim+filter
+					2	remove host genomic reads
+					3	soap mapping to microbiotic genomics
+	-o|outdir	:output directory path. Conatins the results and scripts.
+	-c|config	:set parameters for each setp, default Qt=20,l=10,N=1,Qf=15
+					Qt	Qvalue for trim
+					l	bp length for trim
+					N	tolerance number of N for filter
+					Qf	Qvalue for filter. The reads which more than half of the bytes lower than Qf will be discarded.
+	-h|help		:show help info
+	-v|version	:show version and author info.
+USAGE
+};
+my($path_f,$ins_f,$step,$out_dir,$config,%CFG,$help,$version);
+GetOptions(
+	"p|path:s"    => \$path_f,
+	"i|ins:s"     => \$ins_f,
+	"s|step:i"    => \$step,
+	"o|outdir:s"  => \$out_dir,
+	"c|config:s"  => \$config,
+	"h|help:s"    => \$help,
+	"v|version:s" => \$version,
+);
+die &usage if ( (!defined $path_f)||(!defined $ins_f)||(defined $help));
+die &version if defined $version;
+
+# ####################
+# initialize variables
+# ####################
+$step    ||= "123";
+$out_dir ||= $cwd; $out_dir = abs_path($out_dir);
+$config  ||= "Qt=20,l=10,N=1,Qf=15";
+foreach my $par (split(/,/,$config)){
+	my @a = split(/=/,$par);
+	$CFG{$a[0]} = $a[1];
+}
+
+# scripts under bin
+my $bin = "$Bin/bin";
+#my $s_trim   = "$bin/trimReads.pl";
+#my $s_filter = "$bin/filterReads.pl";
+my $s_clean  = "$bin/readsCleaning.pl";
+my $s_rm     = "$bin/rmhost_v1.0.pl";
+my $s_soap   = "$bin/soap2BuildAbudance.dev.pl";
+# public database prefix
 my $s_db     = "/nas/RD_09C/resequencing/resequencing/tmp/pub/Genome/Human/human.fa.index";
-my $s_soap   = "/lfs1/ST_PMO2015G/F13ZOOYJSY1389/metagenomics.20151225/lib/profiling.flow.SE.dev.pl";
-
-my $dir_s = $o."/script";
-my $dir_f = $o."/filter";
-my $dir_t = $o."/trim";
-my $dir_rm= $o."/rmhost";
-my $dir_soap = $o."/soap";
-
-my ($tmp_out,$tmp_out2);
+# project results directiory structure
+my $dir_s = $out_dir."/script";
+	my $dir_sI = $dir_s."/individual";
+	my $dir_sL = $dir_s."/linear";
+	my $dir_sB = $dir_s."/steps";
+#my $dir_t = $out_dir."/trim";
+#my $dir_f = $out_dir."/filter";
+my $dir_c = $out_dir."/clean";
+my $dir_r = $out_dir."/rmhost";
+my $dir_sp = $out_dir."/soap";
 
 system "mkdir -p $dir_s" unless(-d $dir_s);
-system "mkdir -p $dir_f" unless(-d $dir_f or $s !~ /1/);
-system "mkdir -p $dir_t" unless(-d $dir_t or $s !~ /2/);
-system "mkdir -p $dir_rm" unless(-d $dir_rm or $s !~ /3/);
-system "mkdir -p $dir_soap" unless(-d $dir_soap or $s !~ /4/);
+	system "mkdir -p $dir_sI" unless(-d $dir_sI);
+	system "mkdir -p $dir_sL" unless(-d $dir_sL);
+	system "mkdir -p $dir_sB" unless(-d $dir_sB);
+#system "mkdir -p $dir_f" unless(-d $dir_f or $s !~ /1/);
+#system "mkdir -p $dir_t" unless(-d $dir_t or $s !~ /2/);
+system "mkdir -p $dir_c" unless(-d $dir_c or $step !~ /1/);
+system "mkdir -p $dir_r" unless(-d $dir_r or $step !~ /2/);
+system "mkdir -p $dir_sp" unless(-d $dir_sp or $step !~ /3/);
 
-open B12,">$o/batch.1-2nd.sh";
-open B3,">$o/batch.3rd.sh";
-open B4,">$o/batch.4nd.sh";
-open C1,">$o/qsub_all.sh";
+#open B1,">$dir_s/batch.trim.sh";
+#open B2,">$dir_s/batch.filter.sh";
+open B1,">$dir_s/batch.clean.sh";
+open B2,">$dir_s/batch.rmhost.sh";
+open B3,">$dir_s/batch.soap.sh";
+open C1,">$out_dir/qsub_all.sh";
 
-#print B12 "wdir=$dir_t\n";
-#print B3 "wdir=$dir_rm\n";
-#print B4 "wdir=$dir_soap\n";
-
-open IN,"<$f" || die $!;
+open IN,"<$path_f" || die $!;
+my ($tmp_out,$tmp_outN,$tmp_outQ);
 while (<IN>){
 	chomp;
 	my @a = split;
-	my ($sam,$tq,$tl,$nc,$qc,$path,$soapPfx) = @a;
-	open S12,">$dir_s/$sam.12.sh";
-	if ($s =~ /1/){
-		print S12 "perl $s_trim $path $dir_t/$sam $tq $tl\n";
-		$tmp_out = "$dir_t/$sam.trim.fq.gz";
+	my ($sam,$pfx,$path) = @a;
+	open S1,">$dir_sI/$pfx.01.clean.sh";
+	if ($step =~ /1/){
+		print S1 "perl $s_clean $path $dir_c/$pfx $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'}\n";
+		$tmp_out  = "$dir_c/$pfx.trimed.fq.gz";
+		$tmp_outN = "$dir_c/$pfx.cleanN.fq.gz";
+		$tmp_outQ = "$dir_c/$pfx.cleanQ.fq.gz";
 	}
-	if ($s =~ /2/){
-		$tmp_out ||= $path;
-		print S12 "perl $s_filter $tmp_out $dir_f/$sam $nc\n";
-		print S12 "perl $s_tMore $dir_f/$sam.clean.fq.gz $dir_f/$sam $qc \n";
-		$tmp_out = "$dir_f/$sam.clean.fq.gz";
-		$tmp_out2 = "$dir_f/$sam.clean_more.fq.gz";
+#	if ($s =~ /2/){
+#		$tmp_out ||= $path;
+#		print S2 "perl $s_filter $tmp_out $dir_f/$pfx $nc\n";
+#		print S2 "perl $s_tMore $dir_f/$pfx.clean.fq.gz $dir_f/$pfx $qc \n";
+#		$tmp_out = "$dir_f/$pfx.cleanN.fq.gz";
+#		$tmp_out2 = "$dir_f/$pfx.cleanQ.fq.gz";
+#	}
+	close S1;
+	open S2,">$dir_sI/$pfx.02.rmhost.sh";
+	if ($step =~ /2/){
+		$tmp_outQ ||= $path;
+		print S2 "perl $s_rm -a $tmp_outQ -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$pfx -q\n";
+		$tmp_out = "$dir_r/$pfx.rmhost.fq.gz";
 	}
-	close S12;
-	open S3,">$dir_s/$sam.3.sh";
-	open S3M,">$dir_s/$sam.3M.sh";
-	if ($s =~ /3/){
-		$tmp_out ||= $path;
-		print S3 "perl $s_rm -a $tmp_out -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_rm/$sam -q\n";
-		print S3M "perl $s_rm -a $tmp_out2 -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_rm/$sam.more -q\n";
-		$tmp_out = "$dir_rm/$sam.rmhost.fq.gz";
-		$tmp_out2 = "$dir_rm/$sam.more.rmhost.fq.gz";
-	}
-	close S3;
-	close S3M;
+	close S2;
 
-	if ($s =~ /4/){
-		open S4,">$dir_s/$sam.4.sh";
-		open S4M,">$dir_s/$sam.4M.sh";
+	if ($step =~ /3/){
+		open S3,">$dir_sp/$pfx.03.soap.sh";
 		$tmp_out ||= $path;
-		print S4 "perl $s_soap -i1 $tmp_out -ins $f_ins -o $dir_soap -p $sam > $dir_soap/$sam.log\n";
-		print S4M "perl $s_soap -i1 $tmp_out2 -ins $f_ins -o $dir_soap -p $sam.more > $dir_soap/$sam.more.log\n";
-		close S4;
-		close S4M;
+		print S3 "perl $s_soap -i1 $tmp_out -ins $ins_f -o $dir_s -p $pfx > $dir_s/$pfx.log\n";
+		close S3;
 	}
-	print B12 "sh $dir_s/$sam.12.sh\n";
-#	print B3 "qsub -wd \$wdir -q st.q -P st_ms -l vf=7G $dir_s/$sam.3.sh\n";
-#	print B4 "qsub -wd \$wdir -q st.q -P st_ms -l vf=14G $dir_s/$sam.4.sh\n";
-	print B3 "sh $dir_s/$sam.3.sh\nsh $dir_s/$sam.3M.sh\n";
-	print B4 "sh $dir_s/$sam.4.sh\nsh $dir_s/$sam.4M.sh\n";
+	print B1 "sh $dir_s/$pfx.01.clean.sh\n";
+	print B2 "sh $dir_s/$pfx.02.rmhost.sh\n";
+	print B3 "sh $dir_s/$pfx.03.soap.sh\n";
 }
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.2 -d $o/qsub_12 -l vf=0.2G -q st.q -P st_ms -r $o/batch.1-2nd.sh\n";
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.3 -d $o/qsub_3 -l vf=7G -q st.q -P st_ms -r $o/batch.3rd.sh\n";
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.4 -d $o/qsub_4 -l vf=12G -q st.q -P st_ms -r $o/batch.4nd.sh\n";
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.2 -d $dir_s/qsub_1 -l vf=0.3G -q st.q -P st_ms -r $dir_s/batch.clean.sh\n";
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.3 -d $dir_s/qsub_2 -l vf=8G -q st.q -P st_ms -r $dir_s/batch.rmhost.sh\n";
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N bat.4 -d $dir_s/qsub_3 -l vf=15G -q st.q -P st_ms -r $dir_s/batch.soap.sh\n";
 
-close B12;
+close B1;
+close B2;
 close B3;
-close B4;
+
+
+# ####################
+# SUB FUNCTION
+# ####################
+sub version {
+	print <<VERSION;
+	version:	v0.10
+	update:		20160111
+	author:		fangchao\@genomics.cn
+
+VERSION
+};
+
