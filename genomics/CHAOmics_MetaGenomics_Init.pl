@@ -52,6 +52,8 @@ die &version if defined $version;
 # ####################
 $step    ||= "123";
 $out_dir ||= $cwd; $out_dir = abs_path($out_dir);
+$path_f = abs_path($path_f);
+$ins_f  = abs_path($ins_f);
 $config  ||= "Qt=20,l=10,N=1,Qf=15,lf=0";
 foreach my $par (split(/,/,$config)){
 	my @a = split(/=/,$par);
@@ -63,7 +65,7 @@ my $bin = "$Bin/bin";
 #my $s_trim   = "$bin/trimReads.pl";
 #my $s_filter = "$bin/filterReads.pl";
 my $s_clean  = "$bin/readsCleaning.pl";
-my $s_rm     = "$bin/rmhost_v1.0.pl";
+my $s_rm     = "/ifs5/PC_MICRO_META/PRJ/MetaSystem/analysis_flow/bin/program/rmhost_v1.0.pl";
 my $s_soap   = "$bin/soap2BuildAbudance.dev.pl";
 # public database prefix
 my $s_db     = "/nas/RD_09C/resequencing/resequencing/tmp/pub/Genome/Human/human.fa.index";
@@ -105,15 +107,15 @@ while (<IN>){
 }
 
 foreach my $sam (keys %SAM){
-	my @fqs = keys %{$SAM{$sam}};
+	my @fqs = sort keys %{$SAM{$sam}};
 	die "$sam got more than 2 fq files, pls check it out!" if @fqs > 2;
 	my ($fq1,$fq2) = ($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]});
-
+###############################
 	if ($step =~ /1/){
 		open SH,">$dir_sI/$sam.clean.sh";
 		if (@fqs eq 2){
 			print SH "perl $s_clean $fq1 $fq2 $dir_c/$sam $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'} $CFG{'lf'}\n";
-			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_r/$sam.clean.fq1.gz","$dir_r/$sam.clean.fq2.gz");
+			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_c/$sam.clean.fq1.gz","$dir_c/$sam.clean.fq2.gz");
 		}else{
 			print SH "perl $s_clean $fq1 $fq1 $dir_c/$sam $CFG{'Qt'} $CFG{'l'} $CFG{'N'} $CFG{'Qf'} $CFG{'lf'}\n";
 			$tmp_out = "$dir_c/$sam.clean.fq.gz";
@@ -121,12 +123,12 @@ foreach my $sam (keys %SAM){
 		close SH;
 		print B1 "sh $dir_sI/$sam.clean.sh\n";
 	}
-
+###############################
 	if ($step =~ /2/){
 		open SH,">$dir_sI/$sam.rmhost.sh";
 		if (@fqs eq 2){
-			print SH "perl $s_rm -a $fq1 -b $fq2 -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$sam -q\n";
-			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_r/$sam.rmhost.fq1.gz","$dir_r/$sam.rmhost.fq2.gz");
+			print SH "perl $s_rm -a $SAM{$sam}{$fqs[0]} -b $SAM{$sam}{$fqs[1]} -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$sam -q\n";
+			($SAM{$sam}{$fqs[0]}, $SAM{$sam}{$fqs[1]}) = ("$dir_r/$sam.rmhost.1.fq.gz","$dir_r/$sam.rmhost.2.fq.gz");
 		}else{
 			print SH "perl $s_rm -a $tmp_out -d $s_db -m 4 -s 32 -s 30 -r 1 -v 7 -i 0.9 -t 8 -f Y -p  $dir_r/$sam -q\n";
 			$tmp_out = "$dir_r/$sam.rmhost.fq.gz";
@@ -134,7 +136,7 @@ foreach my $sam (keys %SAM){
 		close SH;
 		print B2 "sh $dir_sI/$sam.rmhost.sh\n";
 	}
-
+###############################
 	if ($step =~ /3/){
 		open SH,">$dir_sI/$sam.soap.sh";
 		if (@fqs eq 2){
@@ -146,9 +148,16 @@ foreach my $sam (keys %SAM){
 		print B3 "sh $dir_sI/$sam.soap.sh\n";
 	}
 }
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.c -d $dir_s/qsub_1 -l vf=0.3G -q st.q -P st_ms -r $dir_s/batch.clean.sh\n" if $step =~ /1/;
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.r -d $dir_s/qsub_2 -l vf=8G,p=8 -q st.q -P st_ms -r $dir_s/batch.rmhost.sh\n" if $step =~ /2/;
-print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.s -d $dir_s/qsub_3 -l vf=15G,p=8 -q st.q -P st_ms -r $dir_s/batch.soap.sh\n" if $step =~ /3/;
+$CFG{'q'}  ||= "st.q";
+$CFG{'P'}  ||= "st_ms";
+$CFG{'pro'}  ||= 8;
+$CFG{'vf1'} ||= "0.3G";
+$CFG{'vf2'} ||= "8G";
+$CFG{'vf3'} ||= "15G";
+$CFG{'m'} ||= 30;
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.c -d $dir_s/qsub_1 -l vf=$CFG{'vf1'} -q $CFG{'q'} -P $CFG{'P'} -r -m $CFG{'m'} $dir_s/batch.clean.sh\n" if $step =~ /1/;
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.r -d $dir_s/qsub_2 -l vf=$CFG{'vf2'} -q $CFG{'q'} -P $CFG{'P'} -r -m $CFG{'m'} $dir_s/batch.rmhost.sh\n" if $step =~ /2/;
+print C1 "perl /home/fangchao/bin/qsub_all.pl -N B.s -d $dir_s/qsub_3 -l vf=$CFG{'vf3'},p=$CFG{'pro'} -q $CFG{'q'} -P $CFG{'P'} -r -m $CFG{'m'} $dir_s/batch.soap.sh\n" if $step =~ /3/;
 
 close B1;
 close B2;
@@ -160,7 +169,7 @@ close B3;
 # ####################
 sub version {
 	print <<VERSION;
-	version:	v0.10
+	version:	v0.12
 	update:		20160111
 	author:		fangchao\@genomics.cn
 
